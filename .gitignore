@@ -1,0 +1,38 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Database files (local data — not committed)
+*.db
+*.sqlite
+*.sqlite3
+
+# Scraped data (regenerated locally)
+data/raw/*
+data/exports/*
+!data/raw/.gitkeep
+!data/exports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build/dist
+build/
+dist/
+*.egg-info/
