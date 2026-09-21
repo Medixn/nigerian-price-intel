@@ -4,6 +4,7 @@ Abstract base class for all site scrapers.
 Every site-specific scraper inherits from BaseScraper, which provides:
 - HTTP client with sensible defaults (User-Agent, timeout, redirects)
 - Polite rate limiting between requests
+- Automatic retry with exponential backoff on transient failures
 - Structured logging
 - A consistent RawListing output format
 
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 import httpx
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 logger = logging.getLogger(__name__)
@@ -70,13 +71,56 @@ class BaseScraper(ABC):
             follow_redirects=True,
         )
 
-    def fetch(self, url: str) -> httpx.Response:
-        """Fetch a URL with a polite delay and logging."""
+    def fetch(self, url: str, max_retries: int = 3) -> httpx.Response:
+        """
+        Fetch a URL with a polite delay, logging, and retries.
+
+        Transient failures (connection reset, timeout, 5xx, 429) get retried
+        with exponential backoff: 5s, 10s, 20s. Non-retryable failures (4xx
+        other than 429) raise immediately.
+        """
         self.logger.info("Fetching %s", url)
         time.sleep(self.request_delay)
-        response = self.client.get(url)
-        response.raise_for_status()
-        return response
+
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.get(url)
+
+                # Retry on server errors and rate-limit responses
+                if response.status_code >= 500 or response.status_code == 429:
+                    self.logger.warning(
+                        "Attempt %d/%d — HTTP %d on %s",
+                        attempt, max_retries, response.status_code, url,
+                    )
+                    last_exc = httpx.HTTPStatusError(
+                        f"HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                    time.sleep(5 * (2 ** (attempt - 1)))  # 5s, 10s, 20s
+                    continue
+
+                response.raise_for_status()
+                return response
+
+            except (
+                httpx.ConnectError,
+                httpx.ReadError,
+                httpx.RemoteProtocolError,
+                httpx.TimeoutException,
+            ) as exc:
+                self.logger.warning(
+                    "Attempt %d/%d — %s: %s",
+                    attempt, max_retries, type(exc).__name__, exc,
+                )
+                last_exc = exc
+                time.sleep(5 * (2 ** (attempt - 1)))  # 5s, 10s, 20s
+
+        # All attempts failed
+        assert last_exc is not None
+        raise last_exc
 
     @abstractmethod
     def scrape(self, start_url: str, max_pages: int = 1) -> Iterator[RawListing]:

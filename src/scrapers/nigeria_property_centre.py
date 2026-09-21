@@ -30,16 +30,35 @@ class NigeriaPropertyCentreScraper(BaseScraper):
     base_url = NPC_BASE
 
     def scrape(self, start_url: str, max_pages: int = 1) -> Iterator[RawListing]:
-        """Scrape listings across pages."""
+        """
+        Scrape listings across pages, tolerating transient page failures.
+
+        A single failed page is skipped. Only three consecutive failures
+        cause us to stop, since that usually means the site is down or
+        we've been rate-limited hard.
+        """
+        consecutive_failures = 0
+
         for page_num in range(1, max_pages + 1):
             page_url = start_url if page_num == 1 else f"{start_url}?page={page_num}"
+
             try:
                 html = self.fetch(page_url).text
+                consecutive_failures = 0  # reset counter on success
             except Exception as exc:
-                self.logger.error("Failed to fetch %s: %s", page_url, exc)
-                return
+                consecutive_failures += 1
+                self.logger.error(
+                    "Failed to fetch %s (%d consecutive): %s",
+                    page_url, consecutive_failures, exc,
+                )
+                if consecutive_failures >= 3:
+                    self.logger.error("Too many consecutive failures; stopping.")
+                    return
+                continue  # skip this page, try the next
 
-            listings = list(self.parse_html(html, purpose=self._purpose_from_url(start_url)))
+            listings = list(
+                self.parse_html(html, purpose=self._purpose_from_url(start_url))
+            )
             self.logger.info("Page %d: parsed %d listings", page_num, len(listings))
 
             if not listings:
@@ -72,15 +91,13 @@ class NigeriaPropertyCentreScraper(BaseScraper):
             # Merge JSON-LD data if available (more reliable than HTML)
             jld = json_ld_index.get(source_id, {})
             if jld:
-                # JSON-LD URL is often more complete (absolute)
                 parsed["source_url"] = jld.get("url") or parsed["source_url"]
                 parsed["title"] = jld.get("name") or parsed["title"]
 
                 # Only accept NGN prices. Some listings are priced in USD;
                 # those get skipped until we add currency conversion.
                 if jld.get("price") and jld.get("currency", "NGN") == "NGN":
-                    # Preserve the period suffix from the HTML extraction
-                    # (e.g. " /yr" or " /month"). JSON-LD only gives us the number.
+                    # Preserve period suffix from HTML (" /yr", " /month").
                     html_price = parsed.get("raw_price", "")
                     period_suffix = self._extract_period_suffix(html_price)
                     parsed["raw_price"] = f"₦{jld['price']}{period_suffix}"
@@ -202,13 +219,12 @@ class NigeriaPropertyCentreScraper(BaseScraper):
             "₦15,500,000 /yr"      -> " /yr"
             "₦2,500,000 /month"    -> " /month"
             "₦38000000"            -> ""
-
-        We use this to preserve the period when merging with JSON-LD prices
-        (which only carry the bare number).
         """
         if not price_text:
             return ""
-        m = re.search(r"(/(?:yr|year|annum|month|mo)\b)", price_text, re.IGNORECASE)
+        m = re.search(
+            r"(/(?:yr|year|annum|month|mo)\b)", price_text, re.IGNORECASE
+        )
         if m:
             return " " + m.group(1)
         return ""
@@ -221,19 +237,16 @@ class NigeriaPropertyCentreScraper(BaseScraper):
         suffix "/yr" or "/month" in a sibling span. We combine them so the
         price parser knows whether we're dealing with annual or monthly rent.
 
-        Only accepts ₦-denominated prices. USD or other currencies return an
-        empty string so they get skipped by the ingestion layer.
+        Only accepts ₦-denominated prices. USD or other currencies return
+        an empty string so they get skipped by the ingestion layer.
         """
         for span in card.find_all("span"):
             text = span.get_text(strip=True)
             if "₦" in text and any(c.isdigit() for c in text):
-                # Look at the very next sibling span for a period suffix.
-                # Example: <span>₦15,500,000</span><span>/yr</span>
                 period = ""
                 sibling = span.find_next_sibling("span")
                 if sibling:
                     sibling_text = sibling.get_text(strip=True)
-                    # Match "/yr", "/month", "per annum", etc.
                     if "/" in sibling_text or "per " in sibling_text.lower():
                         period = " " + sibling_text
                 return (text + period).strip()
@@ -244,21 +257,30 @@ class NigeriaPropertyCentreScraper(BaseScraper):
         Find a `<use href="#i-bed">` and read the leading number from the
         text of its enclosing <span>.
 
-        Returns the numeric part as a string, e.g. "2 beds" → "2".
+        Returns the numeric part as a string, e.g. "2 beds" -> "2".
+
+        Sanity-checks the result: Nigerian residential listings max out
+        around 20 bedrooms. Anything larger is a parsing artefact (we
+        grabbed a number from a description or a phone number) and is
+        rejected.
         """
         use = card.find("use", href=f"#{icon_id}")
         if not use:
             return None
 
-        # Walk up to the enclosing <span> or <div> that has text
         parent = use.find_parent("span") or use.find_parent("div")
         if not parent:
             return None
 
         text = parent.get_text(" ", strip=True)
-        # Extract leading number: "2 beds" → "2", "1 bath" → "1", "3 toilets" → "3"
         m = re.match(r"(\d+)", text)
-        return m.group(1) if m else None
+        if not m:
+            return None
+
+        value = int(m.group(1))
+        if value < 1 or value > 20:
+            return None
+        return str(value)
 
     def _extract_location(self, card: Tag) -> str | None:
         """
@@ -276,12 +298,10 @@ class NigeriaPropertyCentreScraper(BaseScraper):
         if not wrapper:
             return None
 
-        # The actual text is inside a child with class "truncate"
         text_el = wrapper.select_one(".truncate")
         if text_el:
             return text_el.get_text(strip=True) or None
 
-        # Fallback: entire wrapper text (may include the "Added today" badge)
         text = wrapper.get_text(" ", strip=True)
         return text or None
 
@@ -293,7 +313,7 @@ class NigeriaPropertyCentreScraper(BaseScraper):
         for p in card.find_all("p"):
             text = p.get_text(" ", strip=True)
             if " for rent" in text.lower() or " for sale" in text.lower():
-                if len(text) < 80:  # avoid matching descriptions
+                if len(text) < 80:
                     return text
         return None
 
@@ -314,5 +334,4 @@ class NigeriaPropertyCentreScraper(BaseScraper):
         text = parent.get_text(" ", strip=True).lower()
         if "today" in text:
             return datetime.now(timezone.utc).isoformat()
-        # "N days ago" parsing left for a later pass
         return None
