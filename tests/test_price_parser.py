@@ -14,7 +14,19 @@ CASES = [
     ("450,000 monthly", 450_000, "monthly"),
     ("₦300,000", 300_000, None),
     ("", None, None),
+    
+    # Real-world messy cases from Nigerian property sites
+    ("₦1.2 million per annum (service charge included)", 1_200_000, "annual"),
+    ("N2,500,000.00 yearly", 2_500_000, "annual"),
+    ("1,800,000", 1_800_000, None),
+    ("₦4.5m/annum", 4_500_000, "annual"),
+    ("600k per month", 600_000, "monthly"),
+    ("₦85,000,000", 85_000_000, None),
+    ("1.85 billion", 1_850_000_000, None),
+    ("Rent: 3,500,000 per annum", 3_500_000, "annual"),
+    ("₦12m yearly (negotiable)", 12_000_000, "annual"),
 ]
+
 
 
 def main() -> None:
