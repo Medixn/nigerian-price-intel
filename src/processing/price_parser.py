@@ -3,24 +3,28 @@ import re
 from typing import Optional, Tuple
 
 
-# Multiplier suffixes, in order of length (longest first) so "million"
-# matches before "m". All lowercase.
+# Multiplier suffixes. Deliberately drop bare "b" (ambiguous: billion? byte?).
 _MULTIPLIERS = {
     "k": 1_000,
     "m": 1_000_000,
     "million": 1_000_000,
     "billion": 1_000_000_000,
     "bn": 1_000_000_000,
-    "b": 1_000_000_000,
 }
 
-# Period patterns. Order matters: longer / more specific first.
+
+# Period patterns. Order matters: more specific first.
 # Each entry is (regex_pattern, canonical_period).
 _PERIOD_PATTERNS = [
+    # Slash shorthand — most common on NPC. Must come before the
+    # full-word patterns so "/yr" matches before "\byear\b".
+    (r"/\s*y(?:r|ear)?\b", "annual"),          # /yr, /y, /year
+    (r"/\s*mo(?:nth)?\b", "monthly"),          # /mo, /month
+    # Full-word forms
     (r"per\s*annum", "annual"),
     (r"per\s*month", "monthly"),
-    (r"\bp\.?\s*a\.?\b", "annual"),      # "p.a", "pa", "p a"
-    (r"\bp\.?\s*m\.?\b", "monthly"),     # "p.m", "pm", "p m"
+    (r"\bp\.?\s*a\.?\b", "annual"),            # p.a, pa, p a
+    (r"\bp\.?\s*m\.?\b", "monthly"),           # p.m, pm, p m
     (r"annum", "annual"),
     (r"yearly|\byear\b", "annual"),
     (r"monthly|\bmonth\b", "monthly"),
@@ -36,19 +40,21 @@ def _clean_text(raw: str) -> str:
     - remove commas
     - collapse whitespace
 
-    Deliberately does NOT strip all 'n' or 'm' characters — those can be
-    meaningful ("bn" = billion, "month" = period).
+    Deliberately does NOT strip:
+      - '/' — needed for '/yr' and '/month' patterns
+      - all 'n' characters — that would break 'bn', 'annum', 'month'
+      - all 'm' characters — that would break 'million', 'month'
     """
     text = raw.strip().lower()
 
-    # Remove ₦ symbol
-    text = text.replace("₦", "")
+    # Remove ₦ symbol. Also handle the mojibake 'â‚¦' in case of encoding drift.
+    text = text.replace("₦", "").replace("â‚¦", "")
 
     # Remove leading currency "n" (e.g. "n150m") — only at start
     text = re.sub(r"^\s*n\b", "", text)          # "n" as whole word at start
     text = re.sub(r"^n(?=\d)", "", text)         # "n" immediately before a digit
 
-    # Remove commas
+    # Remove commas (thousands separator)
     text = text.replace(",", "")
 
     # Collapse whitespace
@@ -77,9 +83,9 @@ def _extract_price(text: str) -> Optional[float]:
         "150000000"      -> 150_000_000
     """
     # Match a number followed by an optional multiplier word/letter.
-    # The multiplier must be followed by a word boundary so "250000monthly"
+    # The multiplier must be followed by a non-letter so "250000monthly"
     # is read as 250000, not 250000m + "onthly".
-    pattern = r"(\d+(?:\.\d+)?)\s*(k|m|million|billion|bn|b)?(?![a-z])"
+    pattern = r"(\d+(?:\.\d+)?)\s*(k|m|million|billion|bn)?(?![a-z])"
     match = re.search(pattern, text)
     if not match:
         return None
@@ -101,6 +107,7 @@ def parse_price(raw: str) -> Tuple[Optional[float], Optional[str]]:
         "₦250,000/month"     -> (250000.0, "monthly")
         "N150M"              -> (150000000.0, None)
         "₦1.2bn"             -> (1200000000.0, None)
+        "38000000 /yr"       -> (38000000.0, "annual")
         ""                   -> (None, None)
     """
     if not raw or not raw.strip():

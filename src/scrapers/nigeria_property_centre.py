@@ -79,7 +79,11 @@ class NigeriaPropertyCentreScraper(BaseScraper):
                 # Only accept NGN prices. Some listings are priced in USD;
                 # those get skipped until we add currency conversion.
                 if jld.get("price") and jld.get("currency", "NGN") == "NGN":
-                    parsed["raw_price"] = f"₦{jld['price']}"
+                    # Preserve the period suffix from the HTML extraction
+                    # (e.g. " /yr" or " /month"). JSON-LD only gives us the number.
+                    html_price = parsed.get("raw_price", "")
+                    period_suffix = self._extract_period_suffix(html_price)
+                    parsed["raw_price"] = f"₦{jld['price']}{period_suffix}"
 
             yield RawListing(
                 source=self.source_name,
@@ -189,17 +193,50 @@ class NigeriaPropertyCentreScraper(BaseScraper):
     def _text(el: Tag | None) -> str:
         return el.get_text(" ", strip=True) if el else ""
 
+    @staticmethod
+    def _extract_period_suffix(price_text: str) -> str:
+        """
+        From a raw price string, pull out the period suffix if present.
+
+        Examples:
+            "₦15,500,000 /yr"      -> " /yr"
+            "₦2,500,000 /month"    -> " /month"
+            "₦38000000"            -> ""
+
+        We use this to preserve the period when merging with JSON-LD prices
+        (which only carry the bare number).
+        """
+        if not price_text:
+            return ""
+        m = re.search(r"(/(?:yr|year|annum|month|mo)\b)", price_text, re.IGNORECASE)
+        if m:
+            return " " + m.group(1)
+        return ""
+
     def _extract_price_text(self, card: Tag) -> str:
         """
-        Find the price <span>.
+        Find the price <span> and its period suffix.
 
-        Only accepts ₦-denominated prices. USD or other currencies
-        return an empty string so they get skipped.
+        NPC puts the number in one span (e.g. "₦15,500,000") and the period
+        suffix "/yr" or "/month" in a sibling span. We combine them so the
+        price parser knows whether we're dealing with annual or monthly rent.
+
+        Only accepts ₦-denominated prices. USD or other currencies return an
+        empty string so they get skipped by the ingestion layer.
         """
         for span in card.find_all("span"):
             text = span.get_text(strip=True)
             if "₦" in text and any(c.isdigit() for c in text):
-                return text
+                # Look at the very next sibling span for a period suffix.
+                # Example: <span>₦15,500,000</span><span>/yr</span>
+                period = ""
+                sibling = span.find_next_sibling("span")
+                if sibling:
+                    sibling_text = sibling.get_text(strip=True)
+                    # Match "/yr", "/month", "per annum", etc.
+                    if "/" in sibling_text or "per " in sibling_text.lower():
+                        period = " " + sibling_text
+                return (text + period).strip()
         return ""
 
     def _extract_by_icon(self, card: Tag, icon_id: str) -> str | None:
