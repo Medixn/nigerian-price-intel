@@ -1,0 +1,147 @@
+# Canonical Nigerian property locations.
+# Each entry has a canonical name plus aliases seen in the wild.
+# Our normalizer matches raw location strings against this list.
+
+- canonical: "Lekki Phase 1"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "lekki phase 1"
+    - "lekki phase i"
+    - "lekki phase1"
+    - "lekki ph 1"
+    - "lekki ph1"
+    - "lekki 1"
+    - "lekki phase one"
+    - "phase 1 lekki"
+    - "lekki phase one lagos"
+
+- canonical: "Lekki Phase 2"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "lekki phase 2"
+    - "lekki phase ii"
+    - "lekki ph 2"
+    - "lekki phase2"
+
+- canonical: "Ikate"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "ikate"
+    - "ikate lekki"
+    - "ikate elegushi"
+    - "lekki right"
+
+- canonical: "Lekki"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "lekki"
+    - "lekki lagos"
+
+- canonical: "Victoria Island"
+  state: "Lagos"
+  city: "Lagos Island"
+  aliases:
+    - "victoria island"
+    - "victoria island (vi)"
+    - "vi"
+    - "v.i"
+    - "victoria isl"
+
+- canonical: "Ikoyi"
+  state: "Lagos"
+  city: "Lagos Island"
+  aliases:
+    - "ikoyi"
+    - "ikoyi lagos"
+    - "old ikoyi"
+    - "banana island"
+    - "parkview estate"
+    - "park view estate"
+
+- canonical: "Oniru"
+  state: "Lagos"
+  city: "Lagos Island"
+  aliases:
+    - "oniru"
+    - "oniru victoria island"
+
+- canonical: "Eko Atlantic City"
+  state: "Lagos"
+  city: "Lagos Island"
+  aliases:
+    - "eko atlantic"
+    - "eko atlantic city"
+    - "eko pearl towers"
+
+- canonical: "Ajah"
+  state: "Lagos"
+  city: "Eti-Osa"
+  aliases:
+    - "ajah"
+    - "ajah lagos"
+    - "abijo"
+    - "thomas estate"
+
+- canonical: "Ologolo"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "ologolo"
+    - "ologolo lekki"
+
+- canonical: "Igbo Efon"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "igbo efon"
+    - "igbo-efon"
+    - "igboefon"
+
+- canonical: "Orchid Road"
+  state: "Lagos"
+  city: "Lekki"
+  aliases:
+    - "orchid road"
+    - "orchid"
+    - "orchid lekki"
+
+- canonical: "Ikeja"
+  state: "Lagos"
+  city: "Ikeja"
+  aliases:
+    - "ikeja"
+    - "ikeja lagos"
+
+- canonical: "Yaba"
+  state: "Lagos"
+  city: "Lagos Mainland"
+  aliases:
+    - "yaba"
+    - "yaba lagos"
+
+- canonical: "Surulere"
+  state: "Lagos"
+  city: "Lagos Mainland"
+  aliases:
+    - "surulere"
+    - "surulere lagos"
+
+- canonical: "Shomolu"
+  state: "Lagos"
+  city: "Lagos Mainland"
+  aliases:
+    - "shomolu"
+    - "palmgrove"
+    - "onipanu"
+
+- canonical: "Gwarinpa"
+  state: "FCT"
+  city: "Abuja"
+  aliases:
+    - "gwarinpa"
+    - "gwarinpa estate"
+    - "gwarimpa"
