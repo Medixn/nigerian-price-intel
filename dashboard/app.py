@@ -1,12 +1,9 @@
 """
 Nigerian Property Price Intelligence — Market Overview
-
-The home page. Shows a high-level view of the market:
-KPIs, distribution, top areas, best-value listings.
 """
 from __future__ import annotations
 
-# --- PATH BOOTSTRAP: must come before any src.* imports ---
+# --- PATH BOOTSTRAP ---
 import _path_setup  # noqa: F401
 
 import pandas as pd
@@ -15,9 +12,9 @@ import streamlit as st
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
+from _auth_helpers import current_user
 from src.db.session import session_scope
-from src.models import Listing, NormalizedLocation
-
+from src.models import Listing, NormalizedLocation, User, Watchlist
 
 st.set_page_config(
     page_title="Nigerian Property Price Intelligence",
@@ -133,7 +130,7 @@ with col4:
     with st.container(border=True):
         flagged_pct = (stats["flagged"] / stats["total"] * 100) if stats["total"] else 0
         st.metric("Flagged Anomalies", f"{stats['flagged']:,}", f"{flagged_pct:.1f}%")
-        
+
 # ---------- Distribution by bedroom count ----------
 st.subheader("Price Distribution by Bedroom Count")
 st.caption("Each box shows the middle 50% of listings. Dots are outliers.")
@@ -227,3 +224,35 @@ st.dataframe(
 )
 
 st.caption(f"Data as of latest scrape · {len(df):,} listings loaded · Use the sidebar to explore")
+# ---------- User watchlist (if signed in) ----------
+user = current_user()
+if user:
+    st.markdown("---")
+    st.subheader("⭐ Your Watchlist")
+
+    with session_scope() as session:
+        rows = session.execute(
+            select(Watchlist, Listing)
+            .join(Listing, Listing.id == Watchlist.listing_id)
+            .where(Watchlist.user_id == user["id"])
+        ).all()
+
+        if not rows:
+            st.caption(
+                "No watched listings yet. Go to **Listing Lookup** and click "
+                "'Watch for price drops' on any listing."
+            )
+        else:
+            for w, listing in rows:
+                price = listing.price_annual_ngn or 0
+                last_seen = w.last_notified_price or price
+                change = price - last_seen
+                delta_text = ""
+                if change != 0:
+                    sign = "+" if change > 0 else ""
+                    delta_text = f" ({sign}₦{change:,.0f} since you started watching)"
+
+                st.markdown(
+                    f"- **{listing.title[:80]}** — ₦{price:,.0f}/yr{delta_text}  "
+                    f"[View]({listing.source_url})"
+                )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 # --- PATH BOOTSTRAP ---
 import _path_setup  # noqa: F401
+from _auth_helpers import show_user_badge
 
 from collections import Counter
 
