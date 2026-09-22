@@ -1,15 +1,13 @@
 """
 Deal Finder — surface the best-value listings across the market.
 
-Filters: area (multi-select), bedrooms, max price, include/exclude
-suspicious listings. Sorts by "value score" = how far below peer
-median the listing is.
+Premium feature. Free users see a top-5 preview and an upgrade prompt.
+Premium users get full filtering and unlimited results.
 """
 from __future__ import annotations
 
 # --- PATH BOOTSTRAP ---
 import _path_setup  # noqa: F401
-from _auth_helpers import show_user_badge
 
 import pandas as pd
 import plotly.express as px
@@ -75,12 +73,7 @@ def _format_ngn(value: float) -> str:
 
 
 def _compute_peer_medians(df: pd.DataFrame) -> pd.Series:
-    """
-    For each row, compute the median price of its peer group
-    (same location + bedrooms), excluding outliers.
-
-    Returns a Series aligned with df.index.
-    """
+    """For each row, compute its peer group median (excluding outliers)."""
     clean = df[~df["is_outlier"]]
     medians = (
         clean.groupby(["location", "bedrooms"])["price_annual"]
@@ -94,7 +87,7 @@ def _compute_peer_medians(df: pd.DataFrame) -> pd.Series:
 
 
 def _verdict_for_row(row: pd.Series, median: float | None) -> str:
-    """Return emoji + short label describing how this listing compares to market."""
+    """Return emoji + short label describing how this listing compares."""
     if median is None or pd.isna(median) or median == 0:
         return "⚫ No peers"
     ratio = row["price_annual"] / median
@@ -118,6 +111,23 @@ def _verdict_for_row(row: pd.Series, median: float | None) -> str:
 st.title("🎯 Deal Finder")
 st.caption("Find the best-value listings across the whole market")
 
+# ---------- AUTH GATE ----------
+if "user_id" not in st.session_state:
+    st.warning("Please sign in from the **Account** page to use Deal Finder.")
+    if st.button("🔐 Go to Account"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
+user_plan = st.session_state.get("user_plan", "free")
+is_premium = user_plan == "premium"
+
+if not is_premium:
+    st.info(
+        "**Deal Finder is a Premium feature.** "
+        "You're seeing a preview with the top 5 results. "
+        "Upgrade for full filtering and the complete list."
+    )
+
 df = load_all_listings()
 if df.empty:
     st.warning("No listings in the database yet.")
@@ -132,41 +142,48 @@ df["discount_pct"] = df.apply(
     axis=1,
 )
 
-# ---------- Filters ----------
-st.markdown("### Filters")
+# ---------- Filters (premium only) ----------
+if is_premium:
+    st.markdown("### Filters")
 
-f1, f2, f3, f4 = st.columns([2, 1, 2, 1])
+    f1, f2, f3, f4 = st.columns([2, 1, 2, 1])
 
-with f1:
-    available_locations = sorted(df["location"].dropna().unique())
-    selected_locations = st.multiselect(
-        "Areas (leave empty for all)",
-        available_locations,
-        default=[],
-    )
+    with f1:
+        available_locations = sorted(df["location"].dropna().unique())
+        selected_locations = st.multiselect(
+            "Areas (leave empty for all)",
+            available_locations,
+            default=[],
+        )
 
-with f2:
-    bedroom_options = ["Any"] + [str(i) for i in range(1, 7)]
-    selected_bedrooms = st.selectbox("Bedrooms", bedroom_options, index=0)
+    with f2:
+        bedroom_options = ["Any"] + [str(i) for i in range(1, 7)]
+        selected_bedrooms = st.selectbox("Bedrooms", bedroom_options, index=0)
 
-with f3:
-    price_min = int(df["price_annual"].min())
-    price_max = int(df["price_annual"].max())
-    price_cap = st.slider(
-        "Max price (₦/yr)",
-        min_value=price_min,
-        max_value=price_max,
-        value=price_max,
-        step=max(500_000, (price_max - price_min) // 100),
-        format="₦%d",
-    )
+    with f3:
+        price_min = int(df["price_annual"].min())
+        price_max = int(df["price_annual"].max())
+        price_cap = st.slider(
+            "Max price (₦/yr)",
+            min_value=price_min,
+            max_value=price_max,
+            value=price_max,
+            step=max(500_000, (price_max - price_min) // 100),
+            format="₦%d",
+        )
 
-with f4:
-    show_suspicious = st.checkbox(
-        "Show suspicious",
-        value=False,
-        help="Include listings flagged as suspiciously cheap or expensive.",
-    )
+    with f4:
+        show_suspicious = st.checkbox(
+            "Show suspicious",
+            value=False,
+            help="Include listings flagged as suspiciously cheap or expensive.",
+        )
+else:
+    # Free users get default filter values
+    selected_locations = []
+    selected_bedrooms = "Any"
+    price_cap = int(df["price_annual"].max())
+    show_suspicious = False
 
 # ---------- Apply filters ----------
 filtered = df.copy()
@@ -179,7 +196,6 @@ if selected_bedrooms != "Any":
 
 filtered = filtered[filtered["price_annual"] <= price_cap]
 
-# Handle suspicious/outlier listings
 if not show_suspicious:
     filtered = filtered[
         (~filtered["is_outlier"]) &
@@ -244,10 +260,15 @@ table = scored[[
     "source_url": "Link",
 })
 
+# Free users: limit to top 5
+if not is_premium:
+    total_matches = len(table)
+    table = table.head(5)
+
 st.dataframe(
     table,
     width="stretch",
-    height=700,
+    height=700 if is_premium else 400,
     hide_index=True,
     column_config={
         "Link": st.column_config.LinkColumn("Link", display_text="Open ↗"),
@@ -260,39 +281,48 @@ st.dataframe(
     },
 )
 
-# ---------- Secondary chart: distribution of discounts ----------
-st.markdown("### How the market is distributed")
-st.caption(
-    "The discount distribution across all matching listings. "
-    "Anything left of zero is below its peer median."
-)
+# Free users: upgrade CTA
+if not is_premium:
+    st.warning(
+        f"🔒 **You're seeing 5 of {total_matches} matching listings.** "
+        "Upgrade to Premium for the full list, advanced filters, and price alerts."
+    )
+    if st.button("⭐ Upgrade to Premium", type="primary"):
+        st.switch_page("pages/0_Login.py")
+else:
+    # ---------- Secondary chart: distribution of discounts (premium only) ----------
+    st.markdown("### How the market is distributed")
+    st.caption(
+        "The discount distribution across all matching listings. "
+        "Anything left of zero is below its peer median."
+    )
 
-chart_df = scored[["discount_pct"]].dropna()
+    chart_df = scored[["discount_pct"]].dropna()
 
-if not chart_df.empty:
-    fig = px.histogram(
-        chart_df,
-        x="discount_pct",
-        nbins=40,
-        labels={"discount_pct": "Discount vs peer median (%)"},
-        color_discrete_sequence=["#4C78A8"],
-    )
-    fig.add_vline(
-        x=0,
-        line_dash="dash",
-        line_color="#2CA02C",
-        line_width=2,
-        annotation_text="Peer median",
-        annotation_position="top",
-        annotation_font_color="#2CA02C",
-    )
-    fig.update_layout(
-        height=320,
-        margin=dict(t=60, b=60, l=20, r=20),
-        yaxis_title="Listings",
-        bargap=0.05,
-    )
-    st.plotly_chart(fig, width="stretch")
+    if not chart_df.empty:
+        fig = px.histogram(
+            chart_df,
+            x="discount_pct",
+            nbins=40,
+            labels={"discount_pct": "Discount vs peer median (%)"},
+            color_discrete_sequence=["#4C78A8"],
+        )
+        fig.add_vline(
+            x=0,
+            line_dash="dash",
+            line_color="#2CA02C",
+            line_width=2,
+            annotation_text="Peer median",
+            annotation_position="top",
+            annotation_font_color="#2CA02C",
+        )
+        fig.update_layout(
+            height=320,
+            margin=dict(t=60, b=60, l=20, r=20),
+            yaxis_title="Listings",
+            bargap=0.05,
+        )
+        st.plotly_chart(fig, width="stretch")
 
 st.caption(
     f"Showing {len(table):,} listings matching your filters · "

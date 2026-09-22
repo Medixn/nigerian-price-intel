@@ -1,15 +1,13 @@
 """
 Listing Lookup — full report on a single listing.
 
-Enter a listing ID from the Area Explorer or Deal Finder tables and
-see a comprehensive breakdown: peer comparison, percentile rank,
-fair range, verdict, and warning flags.
+Gated by freemium quota: free users get 3 lookups per day,
+premium users get unlimited.
 """
 from __future__ import annotations
 
 # --- PATH BOOTSTRAP ---
 import _path_setup  # noqa: F401
-from _auth_helpers import show_user_badge
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,8 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from src.db.session import session_scope
-from src.models import Listing
-from src.services.intelligence import estimate_fair_value, score_listing
+from src.models import Listing, User
+from src.services.auth import consume_lookup_quota
+from src.services.intelligence import score_listing
+from src.services.watchlist import (
+    add_to_watchlist,
+    is_watched,
+    remove_from_watchlist,
+)
 
 
 st.set_page_config(
@@ -47,8 +51,6 @@ def load_listing(listing_id: int) -> dict | None:
             return None
 
         score = score_listing(session, listing)
-
-        # Also grab the full peer group for the comparison chart
         peers_df = _load_peers_for(session, listing)
 
         return {
@@ -152,6 +154,16 @@ def _verdict_emoji(verdict: str) -> str:
 st.title("🔎 Listing Lookup")
 st.caption("Get a full report on any listing — is it a good deal?")
 
+# ---------- AUTH GATE ----------
+if "user_id" not in st.session_state:
+    st.warning("Please sign in from the **Account** page to use Listing Lookup.")
+    if st.button("🔐 Go to Account"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
+user_id = st.session_state["user_id"]
+user_plan = st.session_state.get("user_plan", "free")
+
 # ---------- Input ----------
 recent_ids = load_recent_listing_ids()
 
@@ -173,6 +185,54 @@ with col2:
         st.caption(" · ".join(str(i) for i in sample))
 
 st.divider()
+
+# ---------- FREEMIUM QUOTA GATE ----------
+# Only consume quota when the user requests a NEW listing, not on every rerun.
+if user_plan != "premium":
+    listing_id_int = int(listing_id)
+    last_queried = st.session_state.get("_last_queried_listing_id")
+
+    if last_queried != listing_id_int:
+        # New query — consume a quota point
+        with session_scope() as session:
+            user = session.execute(
+                select(User).where(User.id == user_id)
+            ).scalar_one_or_none()
+
+            if user is None:
+                st.error("Session out of sync. Please sign out and sign in again.")
+                st.stop()
+
+            allowed = consume_lookup_quota(session, user)
+            remaining = max(0, 3 - user.listing_lookups_today)
+
+            if not allowed:
+                st.error(
+                    "🔒 **You've reached your daily free limit (3 listing lookups).** "
+                    "Upgrade to Premium for unlimited lookups and price alerts."
+                )
+                if st.button("⭐ Upgrade to Premium", type="primary"):
+                    st.switch_page("pages/0_Login.py")
+                st.stop()
+
+            st.session_state["_last_queried_listing_id"] = listing_id_int
+            st.info(
+                f"**Free plan:** {remaining} lookup"
+                f"{'s' if remaining != 1 else ''} remaining today. "
+                "Upgrade for unlimited access."
+            )
+    else:
+        # Same listing, no quota consumed
+        with session_scope() as session:
+            user = session.execute(
+                select(User).where(User.id == user_id)
+            ).scalar_one_or_none()
+            if user is not None:
+                remaining = max(0, 3 - user.listing_lookups_today)
+                st.info(
+                    f"**Free plan:** {remaining} lookup"
+                    f"{'s' if remaining != 1 else ''} remaining today."
+                )
 
 # ---------- Load and score ----------
 data = load_listing(int(listing_id))
@@ -206,6 +266,31 @@ st.markdown(" · ".join(badges))
 
 if listing["source_url"]:
     st.markdown(f"[Open original listing ↗]({listing['source_url']})")
+
+# ---------- Watch/unwatch button ----------
+with session_scope() as session:
+    user = session.execute(
+        select(User).where(User.id == user_id)
+    ).scalar_one_or_none()
+
+    if user is not None:
+        watching = is_watched(session, user, listing["id"])
+
+        col_a, col_b = st.columns([1, 4])
+        with col_a:
+            if watching:
+                if st.button("❌ Unwatch", use_container_width=True):
+                    remove_from_watchlist(session, user, listing["id"])
+                    session.commit()
+                    st.rerun()
+            else:
+                if st.button("⭐ Watch for price drops", use_container_width=True):
+                    add_to_watchlist(session, user, listing["id"])
+                    session.commit()
+                    st.rerun()
+        with col_b:
+            if watching:
+                st.caption("✓ You'll be notified when this price changes.")
 
 # ---------- Key stats ----------
 st.markdown("### At a glance")
@@ -264,7 +349,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Suspicious warning
 if listing["is_outlier"]:
     st.warning(
         f"⚠️ This listing is flagged as anomalous. Reason: "
@@ -281,7 +365,6 @@ if verdict == "insufficient_data":
 if not peers.empty and peer_median:
     st.markdown("### How it compares to peers")
 
-    # Histogram with a marker on this listing's price
     fig = go.Figure()
 
     fig.add_trace(go.Histogram(
@@ -292,19 +375,16 @@ if not peers.empty and peer_median:
         opacity=0.8,
     ))
 
-    # Vertical line at this listing's price
     fig.add_vline(
         x=listing["price_annual"],
         line_width=3,
         line_color=color,
-        line_dash="solid",
-        annotation_text=f"  This listing: {_format_ngn(listing['price_annual'])}",
+        annotation_text=f"  This: {_format_ngn(listing['price_annual'])}",
         annotation_position="top",
         annotation_font_size=12,
         annotation_font_color=color,
     )
 
-    # Vertical dashed line at median
     fig.add_vline(
         x=peer_median,
         line_width=2,
@@ -328,19 +408,15 @@ if not peers.empty and peer_median:
 
     st.plotly_chart(fig, width="stretch")
 
-# ---------- Fair range summary ----------
+# ---------- Fair value range ----------
 if peer_median:
     q1 = score.get("q1") or 0
     q3 = score.get("q3") or 0
 
     st.markdown("### Fair value range for this peer group")
     st.markdown(
-        f"""
-        **₦{q1:,.0f} — ₦{q3:,.0f} per year** (middle 50% of comparable listings)
-
-        - The cheapest peer is **{_format_ngn(score.get('q1'))}** (25th percentile)
-        - The most expensive peer is **{_format_ngn(score.get('q3'))}** (75th percentile)
-        """
+        f"**{_format_ngn(q1)} — {_format_ngn(q3)} per year** "
+        f"(middle 50% of comparable listings)"
     )
 
 # ---------- Similar listings ----------
