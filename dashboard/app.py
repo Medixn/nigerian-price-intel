@@ -113,23 +113,27 @@ if df.empty:
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric("Total Listings", f"{stats['total']:,}")
+    with st.container(border=True):
+        st.metric("Total Listings", f"{stats['total']:,}")
 
 with col2:
-    median_rent = df["price_annual"].median()
-    st.metric("Median Rent", f"{_format_ngn_compact(median_rent)}/yr")
+    with st.container(border=True):
+        median_rent = df["price_annual"].median()
+        st.metric("Median Rent", f"{_format_ngn_compact(median_rent)}/yr")
 
 with col3:
-    top_area = (
-        df.dropna(subset=["location"])["location"].value_counts().idxmax()
-        if df["location"].notna().any() else "n/a"
-    )
-    st.metric("Most Listed Area", top_area)
+    with st.container(border=True):
+        top_area = (
+            df.dropna(subset=["location"])["location"].value_counts().idxmax()
+            if df["location"].notna().any() else "n/a"
+        )
+        st.metric("Most Listed Area", top_area)
 
 with col4:
-    flagged_pct = (stats["flagged"] / stats["total"] * 100) if stats["total"] else 0
-    st.metric("Flagged Anomalies", f"{stats['flagged']:,}", f"{flagged_pct:.1f}%")
-
+    with st.container(border=True):
+        flagged_pct = (stats["flagged"] / stats["total"] * 100) if stats["total"] else 0
+        st.metric("Flagged Anomalies", f"{stats['flagged']:,}", f"{flagged_pct:.1f}%")
+        
 # ---------- Distribution by bedroom count ----------
 st.subheader("Price Distribution by Bedroom Count")
 st.caption("Each box shows the middle 50% of listings. Dots are outliers.")
