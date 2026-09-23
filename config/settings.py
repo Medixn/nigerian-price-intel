@@ -29,5 +29,8 @@ class Settings(BaseSettings):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+        # --- Resend (email alerts) ---
+    resend_api_key: str = "re_RihYHuCq_3icz93PjL2J6aq5quH2xZXab"
+    alert_from_email: str = "onboarding@resend.dev"
 
 settings = Settings()
