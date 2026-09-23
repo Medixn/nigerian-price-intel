@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     scrape_user_agent: str = "NigerianPriceIntel/0.1"
     request_delay_seconds: float = 2.0
 
+    # --- Paystack ---
+    paystack_secret_key: str = ""
+    paystack_public_key: str = ""
+
     @property
     def data_dir(self) -> Path:
         path = PROJECT_ROOT / "data"
