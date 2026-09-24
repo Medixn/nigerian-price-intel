@@ -36,3 +36,4 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+.streamlit/secrets.toml
