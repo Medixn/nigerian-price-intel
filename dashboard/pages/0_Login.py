@@ -3,7 +3,9 @@ Login / Signup page with Paystack upgrade flow.
 """
 from __future__ import annotations
 
-import _path_setup  # noqa: F401
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 from sqlalchemy import select

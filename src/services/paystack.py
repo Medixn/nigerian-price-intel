@@ -2,13 +2,15 @@
 Paystack integration: initiate transactions and verify payments.
 
 Uses the raw Paystack REST API via httpx — no third-party wrapper needed.
-Paystack's API is stable and simple: two endpoints cover our whole flow.
 
-Docs: https://paystack.com/docs/api/transaction/
+The callback URL is resolved dynamically:
+  1. APP_URL env var (set on Streamlit Cloud secrets)
+  2. Falls back to http://localhost:8501 for local development
 """
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -33,6 +35,17 @@ SUBSCRIPTION_DAYS = 30
 
 class PaystackError(Exception):
     """Raised when the Paystack API returns an error."""
+
+
+def _get_callback_url() -> str:
+    """
+    Return the URL Paystack should redirect users to after payment.
+
+    Streamlit Cloud sets APP_URL via secrets. Locally, we default to
+    localhost.
+    """
+    base = os.getenv("APP_URL", "http://localhost:8501").rstrip("/")
+    return f"{base}/Payment_Callback"
 
 
 def _headers() -> dict[str, str]:
@@ -60,13 +73,14 @@ def initiate_premium_payment(user: User) -> dict:
     """
     reference = f"NI-{user.id}-{secrets.token_hex(8)}"
     amount_kobo = PREMIUM_PRICE_NGN * 100
+    callback_url = _get_callback_url()
 
     payload = {
         "email": user.email,
         "amount": amount_kobo,
         "currency": "NGN",
         "reference": reference,
-        "callback_url": "http://localhost:8501/Payment_Callback",
+        "callback_url": callback_url,
         "metadata": {
             "user_id": user.id,
             "purpose": "premium_subscription",
@@ -80,6 +94,8 @@ def initiate_premium_payment(user: User) -> dict:
             ],
         },
     }
+
+    logger.info("Initializing Paystack payment with callback: %s", callback_url)
 
     try:
         with httpx.Client(timeout=30.0) as client:

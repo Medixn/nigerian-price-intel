@@ -7,7 +7,9 @@ and every listing in that bucket with verdict badges.
 from __future__ import annotations
 
 # --- PATH BOOTSTRAP ---
-import _path_setup  # noqa: F401
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _auth_helpers import show_user_badge
 
 from collections import Counter
